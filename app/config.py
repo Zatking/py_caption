@@ -1,0 +1,1 @@
+CAPTION_DICTIONARY = "app/static/caption_dictionary.json"
