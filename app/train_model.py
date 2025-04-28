@@ -1,122 +1,48 @@
 import os
 import json
-import torch
-from PIL import Image
 from transformers import BlipProcessor, BlipForConditionalGeneration
-from peft import LoraConfig, get_peft_model, TaskType
-from huggingface_hub import push_to_hub
-from torchvision import transforms
-from torch.utils.data import Dataset, DataLoader
-from tqdm import tqdm
 
-# Đường dẫn thư mục ảnh và tệp JSON chứa caption
-IMAGE_DIR = "app/static/images/test_set"
-OUTPUT_JSON = "app/static/caption.json"
+processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
 
-# Thư mục chứa ảnh kiểm tra mới
-TEST_IMAGE_PATH = "app/static/images/test/FU-athlete-foot (7).jpg" 
+def prepare_dataset(image_dir, caption_json, output_json):
+    with open(caption_json, "r", encoding="utf-8") as f:
+        all_captions = json.load(f)
 
-class CaptionDataset(Dataset):
-    def __init__(self, image_dir, caption_json, transform=None):
-        with open(caption_json, 'r') as f:
-            self.data = json.load(f)
-        self.image_dir = image_dir
-        self.transform = transform
+    if not all_captions:
+        print("⚠️ File caption trống hoặc không hợp lệ!")
+        return
 
-    def __len__(self):
-        return len(self.data)
+    dataset = []
+    for disease_label in os.listdir(image_dir):
+        disease_dir = os.path.join(image_dir, disease_label)
 
-    def __getitem__(self, idx):
-        item = self.data[idx]
-        image_file = os.path.join(self.image_dir, item['image_file'])
-        image = Image.open(image_file).convert("RGB")
-        caption = item['caption']
-        if self.transform:
-            image = self.transform(image)
-        return image, caption
+        if os.path.isdir(disease_dir):
+            image_files = [f for f in os.listdir(disease_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
 
-def prepare_dataloader(image_dir, output_json):
-    transform = transforms.Compose([
-        transforms.Resize((256, 256)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    dataset = CaptionDataset(image_dir, output_json, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
-    return dataloader
+            for img_name in image_files:
+                img_path = os.path.join(disease_dir, img_name)
+                caption_key = os.path.join(disease_label, img_name)
 
-def load_pretrained_model():
-    processor = BlipProcessor.from_pretrained("Salesforce/blip2-opt-2.7b")
-    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-opt-2.7b")
-    return processor, model
+                caption = all_captions.get(caption_key)
+                if caption:
+                    dataset.append({
+                        "image": img_path,
+                        "caption": caption,
+                        "label": disease_label 
+                    })
+                else:
+                    print(f"⚠️ Cảnh báo: Không tìm thấy caption cho {caption_key}")
 
-def fine_tune_model(image_dir, output_json):
-    processor, model = load_pretrained_model()
+    if not dataset:
+        print("⚠️ Không có dataset hợp lệ để lưu!")
+        return
 
-    dataloader = prepare_dataloader(image_dir, output_json)
+    print(f"Mẫu dữ liệu: {dataset[:2]}")
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(dataset, f, ensure_ascii=False, indent=2)
 
-    lora_config = LoraConfig(
-        r=8,
-        lora_alpha=32,
-        target_modules=["query", "value"],
-        task_type=TaskType.SEQUENCE_CLASSIFICATION,
-    )
-
-    model = get_peft_model(model, lora_config)
-    model.train()
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
-
-    # Thêm in chi tiết trong quá trình huấn luyện
-    for epoch in range(3):
-        print(f"\nStarting epoch {epoch + 1}...")
-        epoch_loss = 0.0
-
-        for batch_idx, (images, captions) in enumerate(tqdm(dataloader, desc=f"Training Epoch {epoch + 1}", unit="batch")):
-            optimizer.zero_grad()
-
-            inputs = processor(images=images, text=captions, return_tensors="pt", padding=True, truncation=True)
-            labels = inputs.input_ids
-
-            outputs = model(input_ids=inputs.input_ids, labels=labels)
-            loss = outputs.loss
-            loss.backward()
-            optimizer.step()
-
-            epoch_loss += loss.item()
-
-            # In mất mát của mỗi batch
-            print(f"Batch {batch_idx + 1}: Loss = {loss.item()}")
-
-        avg_epoch_loss = epoch_loss / len(dataloader)
-        print(f"Epoch {epoch + 1} completed. Average Loss: {avg_epoch_loss:.4f}")
-
-    print("Training completed.")
-    model.save_pretrained("app/static/fine_tuned_model")
-    processor.save_pretrained("app/static/fine_tuned_model")
-
-def save_model_to_hub():
-    push_to_hub(repo_id="your_huggingface_repo_id", model_path="app/static/fine_tuned_model")
-
-def generate_caption(image_path, processor, model):
-    image = Image.open(image_path).convert("RGB")
-    inputs = processor(images=image, return_tensors="pt")
-    out = model.generate(input_ids=inputs['input_ids'])
-    caption = processor.decode(out[0], skip_special_tokens=True)
-    return caption
-
-def test_new_image(image_path):
-    processor, model = load_pretrained_model()
-    caption = generate_caption(image_path, processor, model)
-    print(f"Generated caption for the image: {caption}")
-
-def train_and_save_model(image_dir, output_json):
-    fine_tune_model(image_dir, output_json)
-    # save_model_to_hub()
+    print(f"✅ Dataset đã được lưu vào {output_json}")
 
 if __name__ == "__main__":
-    # Huấn luyện và lưu mô hình
-    train_and_save_model(IMAGE_DIR, OUTPUT_JSON)
-
-    # Kiểm tra ảnh từ thư mục khác
-    test_new_image(TEST_IMAGE_PATH)
+    prepare_dataset("app/static/images/test_set", "app/static/caption.json", "app/static/prepared_dataset.json")

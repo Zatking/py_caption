@@ -1,11 +1,16 @@
 google.generativeai
 uvicorn 
 torch 
-transformers 
 datasets
 loralib
 tqdm
 peft
 huggingface_hub
+transformers 
+accelerate 
+sentencepiece 
+safetensors 
+bitsandbytes
+torchvision
 
 
