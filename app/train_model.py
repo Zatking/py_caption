@@ -142,8 +142,8 @@ if __name__ == "__main__":
         exit()
 
     print("🚀 Đang load mô hình BLIP (Large)...")
-    processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large")
-    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large")
+    processor = BlipProcessor.from_pretrained("Salesforce/blip2-flan-t5-xl")
+    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-flan-t5-xl")
 
     print("🧠 Bắt đầu fine-tune mô hình...")
     train(model, processor, dataset, epochs=5)
