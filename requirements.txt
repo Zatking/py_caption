@@ -1,2 +1,16 @@
 google.generativeai
+uvicorn 
+torch 
+datasets
+loralib
+tqdm
+peft
+huggingface_hub
+transformers 
+accelerate 
+sentencepiece 
+safetensors 
+bitsandbytes
+torchvision
+
 
